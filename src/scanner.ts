@@ -82,8 +82,10 @@ export function scan(cwd: string, onlyPaths?: Set<string>): ScanResult {
 	const start = Date.now();
 	const allFiles = listGitFiles(cwd);
 
-	// Filter to supported languages
-	const candidates = allFiles.filter(isSupportedFile);
+	// Filter out common non-source directories and unsupported files
+	const candidates = allFiles
+		.filter((f) => !f.startsWith("node_modules/") && !f.startsWith("vendor/") && !f.startsWith("dist/") && !f.startsWith("."))
+		.filter(isSupportedFile);
 	const truncated = Math.max(0, candidates.length - MAX_FILES);
 	const filesToScan = candidates.slice(0, MAX_FILES);
 

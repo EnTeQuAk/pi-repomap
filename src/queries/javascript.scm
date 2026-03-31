@@ -1,13 +1,7 @@
 ; pi-repomap outline query for JavaScript.
-; Derived from Zed's outline.scm, trimmed for repo map use.
-
-(internal_module
-  "namespace" @context
-  name: (_) @name) @item
-
-(enum_declaration
-  "enum" @context
-  name: (_) @name) @item
+; Adapted from Zed's outline.scm, removing TypeScript-only node types
+; (override_modifier, accessibility_modifier) that don't exist in the
+; JavaScript grammar.
 
 (function_declaration
   "async"? @context
@@ -25,10 +19,6 @@
   parameters: (formal_parameters
     "(" @context
     ")" @context)) @item
-
-(interface_declaration
-  "interface" @context
-  name: (_) @name) @item
 
 ; Exported const/let
 (program
@@ -55,7 +45,7 @@
   "class" @context
   name: (_) @name) @item
 
-; Methods in classes
+; Methods in classes (JS has no override/accessibility modifiers)
 (class_body
   (method_definition
     [
@@ -63,26 +53,12 @@
       "set"
       "async"
       "*"
-      "readonly"
       "static"
-      (override_modifier)
-      (accessibility_modifier)
     ]* @context
     name: (_) @name
     parameters: (formal_parameters
       "(" @context
       ")" @context)) @item)
-
-; Class fields
-(public_field_definition
-  [
-    "declare"
-    "readonly"
-    "abstract"
-    "static"
-    (accessibility_modifier)
-  ]* @context
-  name: (_) @name) @item
 
 ; Test blocks
 ((call_expression
