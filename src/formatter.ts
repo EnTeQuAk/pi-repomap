@@ -82,13 +82,9 @@ function formatSummary(filePath: string, file: CachedFile): string {
 function preamble(totalFiles: number, totalSymbols: number): string {
 	return `# Repository Map (${totalFiles} files, ${totalSymbols} symbols)
 
-This map shows the structure of the codebase. Top files have full
-symbol outlines (classes, functions, types with nesting). Files
-below that show only exported/public symbols. The rest are listed
-by name with a symbol count.
-
-To explore any file in detail: \`repomap outline <path>\`
-To refresh after major changes: \`repomap rebuild\`
+Structural overview of the codebase, ranked by cross-file importance.
+Top files show full symbol trees; lower tiers show exports or just
+file names. Use \`repomap outline <path>\` to expand any file.
 `;
 }
 

@@ -205,6 +205,7 @@ export default function (pi: ExtensionAPI) {
 		promptSnippet: "Query the repository symbol map for codebase structure overview",
 		promptGuidelines: [
 			"The repo map in your context shows a structural overview of the codebase. Use `repomap outline <file>` to see full symbol details for any file, especially files listed in the summary tiers.",
+			"Prefer `repomap outline` over `find` or `ls` when exploring code structure. The outline gives you symbols, nesting, and line numbers in one call.",
 		],
 		parameters: Type.Object({
 			action: StringEnum(["status", "rebuild", "outline"] as const),
