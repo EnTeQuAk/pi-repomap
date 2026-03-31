@@ -42,12 +42,27 @@ export function load(cwd: string): RepoMap | null {
 	if (!fs.existsSync(p)) return null;
 
 	try {
-		const data = JSON.parse(fs.readFileSync(p, "utf-8")) as RepoMap;
-		if (data.version !== CACHE_VERSION) return null;
-		return data;
+		const raw = JSON.parse(fs.readFileSync(p, "utf-8"));
+		if (raw.version !== CACHE_VERSION) return null;
+		// Only trust caches written by this process. Prevents loading
+		// a malicious cache shipped inside a cloned repository.
+		if (raw._token !== getSessionToken()) return null;
+		return raw as RepoMap;
 	} catch {
 		return null;
 	}
+}
+
+// Random token written with each cache save, checked on load.
+// Prevents trusting caches written by a different process
+// (e.g., a malicious repo shipping a .pi/cache/repomap.json).
+let sessionToken: string | null = null;
+
+function getSessionToken(): string {
+	if (!sessionToken) {
+		sessionToken = Math.random().toString(36).slice(2) + Date.now().toString(36);
+	}
+	return sessionToken;
 }
 
 /**
@@ -58,9 +73,9 @@ export function save(cwd: string, map: RepoMap): void {
 	const dir = path.dirname(p);
 	fs.mkdirSync(dir, { recursive: true });
 
-	// Write to a temp file then rename for atomicity
+	const output = { ...map, _token: getSessionToken() };
 	const tmp = `${p}.tmp`;
-	fs.writeFileSync(tmp, JSON.stringify(map), "utf-8");
+	fs.writeFileSync(tmp, JSON.stringify(output), "utf-8");
 	fs.renameSync(tmp, p);
 }
 

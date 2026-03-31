@@ -6,6 +6,7 @@
  */
 
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import { extractSymbols, extractImports, extractRefs, type FileSymbols } from "./parser.ts";
 import { detectLanguage, isSupportedFile } from "./languages.ts";
@@ -112,7 +113,11 @@ export function scan(cwd: string, onlyPaths?: Set<string>): ScanResult {
 		const language = detectLanguage(relPath);
 		if (!language) continue;
 
-		const fullPath = `${cwd}/${relPath}`;
+		const fullPath = path.resolve(cwd, relPath);
+		if (!fullPath.startsWith(cwd + "/")) {
+			skipped++;
+			continue;
+		}
 
 		let stat: fs.Stats;
 		try {
