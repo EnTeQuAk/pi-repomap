@@ -263,8 +263,13 @@ export default function (pi: ExtensionAPI) {
 						throw new Error(`Cannot detect language for: ${filePath}`);
 					}
 
-					const fullPath = path.resolve(ctx.cwd, filePath);
-					if (!fullPath.startsWith(ctx.cwd + "/")) {
+					let fullPath: string;
+					try {
+						fullPath = fs.realpathSync(path.resolve(ctx.cwd, filePath));
+					} catch {
+						throw new Error(`Cannot resolve path: ${filePath}`);
+					}
+					if (!fullPath.startsWith(fs.realpathSync(ctx.cwd) + "/")) {
 						throw new Error(`Path escapes project directory: ${filePath}`);
 					}
 					let content: string;

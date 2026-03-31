@@ -113,8 +113,14 @@ export function scan(cwd: string, onlyPaths?: Set<string>): ScanResult {
 		const language = detectLanguage(relPath);
 		if (!language) continue;
 
-		const fullPath = path.resolve(cwd, relPath);
-		if (!fullPath.startsWith(cwd + "/")) {
+		let fullPath: string;
+		try {
+			fullPath = fs.realpathSync(path.resolve(cwd, relPath));
+		} catch {
+			skipped++;
+			continue;
+		}
+		if (!fullPath.startsWith(fs.realpathSync(cwd) + "/")) {
 			skipped++;
 			continue;
 		}
