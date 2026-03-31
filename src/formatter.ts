@@ -120,10 +120,61 @@ interface ScoredFile {
 	score: number;
 }
 
+/**
+ * Score files using cross-file reference analysis.
+ *
+ * Builds a definition map (identifier -> files that define it), then
+ * counts how many times each file's definitions are referenced by
+ * other files. Files whose symbols are widely used rank highest.
+ *
+ * This is a simplified version of aider's PageRank approach: instead
+ * of full graph ranking, we count inbound reference edges. A file
+ * that defines `Celery` which is referenced in 50 other files gets
+ * a high score, regardless of import path resolution.
+ */
 function scoreFiles(entries: [string, CachedFile][]): ScoredFile[] {
+	// Build: identifier name -> set of files that define it
+	const definedIn = new Map<string, Set<string>>();
+	for (const [filePath, file] of entries) {
+		for (const sym of file.symbols) {
+			if (sym.depth > 0) continue; // Only top-level definitions
+			let files = definedIn.get(sym.name);
+			if (!files) {
+				files = new Set();
+				definedIn.set(sym.name, files);
+			}
+			files.add(filePath);
+		}
+	}
+
+	// Count inbound references: for each file's refs, find which files
+	// define those identifiers, and credit the defining file.
+	const inboundCount = new Map<string, number>();
+	for (const [referencerPath, file] of entries) {
+		// Count each referenced identifier once per file (not per occurrence)
+		const seen = new Set<string>();
+		for (const refName of file.refs) {
+			if (seen.has(refName)) continue;
+			seen.add(refName);
+
+			const definers = definedIn.get(refName);
+			if (!definers) continue;
+
+			// Skip self-references and identifiers defined in many files
+			// (common names like "get", "set", "id" are noise)
+			if (definers.size > 5) continue;
+
+			for (const definer of definers) {
+				if (definer === referencerPath) continue;
+				inboundCount.set(definer, (inboundCount.get(definer) ?? 0) + 1);
+			}
+		}
+	}
+
 	const scored = entries.map(([filePath, file]) => {
+		const inbound = inboundCount.get(filePath) ?? 0;
 		const exportedCount = file.symbols.filter((s) => isExported(s, file.language)).length;
-		const score = exportedCount * 10 + file.symbols.length;
+		const score = inbound * 100 + exportedCount * 10 + file.symbols.length;
 		return { filePath, file, score };
 	});
 	scored.sort((a, b) => b.score - a.score);

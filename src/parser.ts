@@ -40,8 +40,8 @@ export interface FileSymbols {
 	symbols: Symbol[];
 }
 
-// Compiled queries, cached after first use per language.
-const queries: Map<string, Parser.Query> = new Map();
+// Compiled queries, cached after first use. Keyed by "language" or "language.imports".
+const queryCache: Map<string, Parser.Query> = new Map();
 
 /**
  * Load a tree-sitter language grammar.
@@ -63,29 +63,29 @@ function resolveQueryDir(): string {
 }
 
 /**
- * Load and compile an outline.scm query for a language.
- * Queries are cached after first compilation.
+ * Load and compile a .scm query file.
+ * Supports both outline queries (language.scm) and import queries (language.imports.scm).
  */
-function loadQuery(language: string): Parser.Query | null {
-	const cached = queries.get(language);
+function loadQuery(language: string, queryType: string = ""): Parser.Query | null {
+	const cacheKey = queryType ? `${language}.${queryType}` : language;
+	const cached = queryCache.get(cacheKey);
 	if (cached) return cached;
 
 	const lang = loadLanguage(language);
 	if (!lang) return null;
 
-	const queryFile = path.join(resolveQueryDir(), `${language}.scm`);
+	const filename = queryType ? `${language}.${queryType}.scm` : `${language}.scm`;
+	const queryFile = path.join(resolveQueryDir(), filename);
 
 	if (!fs.existsSync(queryFile)) return null;
 
 	try {
 		const source = fs.readFileSync(queryFile, "utf-8");
 		const query = new Parser.Query(lang, source);
-		queries.set(language, query);
+		queryCache.set(cacheKey, query);
 		return query;
 	} catch (err) {
-		// Query compilation errors (bad grammar version, unsupported predicates)
-		// are non-fatal. Skip this language.
-		console.error(`Failed to compile query for ${language}: ${err}`);
+		console.error(`Failed to compile ${filename}: ${err}`);
 		return null;
 	}
 }
@@ -183,10 +183,81 @@ function assignDepths(symbols: Symbol[]): Symbol[] {
 }
 
 /**
+ * Extract import/require paths from a source file using tree-sitter queries.
+ *
+ * Returns raw path strings as they appear in the source (e.g. "./foo", "express",
+ * "celery.app"). Resolving these to file paths is the caller's job.
+ */
+export function extractImports(sourceCode: string, language: string): string[] {
+	const lang = loadLanguage(language);
+	const query = loadQuery(language, "imports");
+	if (!lang || !query) return [];
+
+	const parser = new Parser();
+	parser.setLanguage(lang);
+
+	let tree: Parser.Tree;
+	try {
+		tree = parser.parse(sourceCode);
+	} catch {
+		return [];
+	}
+
+	const matches = query.matches(tree.rootNode);
+	const paths: string[] = [];
+
+	for (const match of matches) {
+		const pathCapture = match.captures.find((c) => c.name === "path");
+		if (pathCapture) {
+			// Strip surrounding quotes if present (Go's interpreted_string_literal includes them)
+			const raw = pathCapture.node.text.replace(/^["']|["']$/g, "");
+			if (raw) paths.push(raw);
+		}
+	}
+
+	return [...new Set(paths)];
+}
+
+/**
+ * Extract identifier references from a source file.
+ *
+ * Returns a list of identifier names that are used (called, instantiated,
+ * type-referenced) in the file. Used for cross-file ranking: if file A
+ * references identifier X defined in file B, that's an edge A -> B.
+ */
+export function extractRefs(sourceCode: string, language: string): string[] {
+	const lang = loadLanguage(language);
+	const query = loadQuery(language, "refs");
+	if (!lang || !query) return [];
+
+	const parser = new Parser();
+	parser.setLanguage(lang);
+
+	let tree: Parser.Tree;
+	try {
+		tree = parser.parse(sourceCode);
+	} catch {
+		return [];
+	}
+
+	const matches = query.matches(tree.rootNode);
+	const refs: string[] = [];
+
+	for (const match of matches) {
+		const refCapture = match.captures.find((c) => c.name === "name.reference");
+		if (refCapture) {
+			refs.push(refCapture.node.text);
+		}
+	}
+
+	return refs;
+}
+
+/**
  * List supported language names.
  */
 export function supportedLanguages(): string[] {
-	return Object.keys(GRAMMAR_MODULES);
+	return Object.keys(GRAMMARS);
 }
 
 /**

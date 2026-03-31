@@ -14,6 +14,8 @@ export interface CachedFile {
 	mtime: number;
 	language: string;
 	symbols: Symbol[];
+	imports: string[];
+	refs: string[];
 }
 
 export interface RepoMap {

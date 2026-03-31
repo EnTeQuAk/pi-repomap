@@ -7,7 +7,7 @@
 
 import * as fs from "node:fs";
 import { execFileSync } from "node:child_process";
-import { extractSymbols, type FileSymbols } from "./parser.ts";
+import { extractSymbols, extractImports, extractRefs, type FileSymbols } from "./parser.ts";
 import { detectLanguage, isSupportedFile } from "./languages.ts";
 
 const MAX_FILES = 2000;
@@ -23,6 +23,10 @@ export interface ScannedFile {
 	language: string;
 	/** Extracted symbols */
 	symbols: FileSymbols;
+	/** Import paths found in this file */
+	imports: string[];
+	/** Identifier names referenced in this file (for cross-file ranking) */
+	refs: string[];
 }
 
 export interface ScanResult {
@@ -82,9 +86,13 @@ export function scan(cwd: string, onlyPaths?: Set<string>): ScanResult {
 	const start = Date.now();
 	const allFiles = listGitFiles(cwd);
 
-	// Filter out common non-source directories and unsupported files
+	// Filter out non-source directories (at any depth) and unsupported files.
+	const skipDirs = ["node_modules", "vendor", "dist", "build", ".git", "__pycache__"];
 	const candidates = allFiles
-		.filter((f) => !f.startsWith("node_modules/") && !f.startsWith("vendor/") && !f.startsWith("dist/") && !f.startsWith("."))
+		.filter((f) => {
+			const parts = f.split("/");
+			return !parts.some((p) => skipDirs.includes(p)) && !f.startsWith(".");
+		})
 		.filter(isSupportedFile);
 	const truncated = Math.max(0, candidates.length - MAX_FILES);
 	const filesToScan = candidates.slice(0, MAX_FILES);
@@ -133,6 +141,8 @@ export function scan(cwd: string, onlyPaths?: Set<string>): ScanResult {
 			mtime: stat.mtimeMs,
 			language,
 			symbols,
+			imports: extractImports(content, language),
+			refs: extractRefs(content, language),
 		});
 	}
 

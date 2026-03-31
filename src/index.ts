@@ -70,6 +70,8 @@ function fullBuild(
 			mtime: f.mtime,
 			language: f.language,
 			symbols: f.symbols.symbols,
+			imports: f.imports,
+			refs: f.refs,
 		};
 	}
 
@@ -108,6 +110,8 @@ function mergeResults(
 			mtime: f.mtime,
 			language: f.language,
 			symbols: f.symbols.symbols,
+			imports: f.imports,
+			refs: f.refs,
 		};
 	}
 
@@ -274,6 +278,8 @@ export default function (pi: ExtensionAPI) {
 						mtime: Date.now(),
 						language,
 						symbols: result.symbols,
+						imports: [],
+						refs: [],
 					});
 
 					return {
