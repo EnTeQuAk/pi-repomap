@@ -17,6 +17,7 @@ import { detectLanguage, isSupportedFile } from "./languages.ts";
 import { extractSymbols } from "./parser.ts";
 import { formatForLLM, formatFileOutline } from "./formatter.ts";
 import * as fs from "node:fs";
+import * as path from "node:path";
 
 /**
  * Build or incrementally update the repo map for a project.
@@ -262,7 +263,10 @@ export default function (pi: ExtensionAPI) {
 						throw new Error(`Cannot detect language for: ${filePath}`);
 					}
 
-					const fullPath = `${ctx.cwd}/${filePath}`;
+					const fullPath = path.resolve(ctx.cwd, filePath);
+					if (!fullPath.startsWith(ctx.cwd + "/")) {
+						throw new Error(`Path escapes project directory: ${filePath}`);
+					}
 					let content: string;
 					try {
 						content = fs.readFileSync(fullPath, "utf-8");
