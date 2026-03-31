@@ -42,12 +42,19 @@ function formatFull(filePath: string, file: CachedFile): string {
 		const indent = " ".repeat(sym.depth + 1);
 		const ctx = sym.context.join(" ");
 		const range = sym.line === sym.endLine ? "" : ` L${sym.line}-${sym.endLine}`;
-		const inherit = sym.inherits.length > 0 ? ` (: ${sym.inherits.join(", ")})` : "";
-		const label = ctx ? `${ctx} ${sym.name}` : sym.name;
-		lines.push(`${indent}${label}${inherit}${range}`);
+		const label = formatSymbolLabel(sym);
+		lines.push(`${indent}${label}${range}`);
 	}
 
 	return lines.join("\n");
+}
+
+/** Format a symbol's name with context keywords and inheritance. */
+function formatSymbolLabel(sym: Symbol): string {
+	const ctx = sym.context.join(" ");
+	const inherit = sym.inherits.length > 0 ? `(${sym.inherits.join(", ")})` : "";
+	const name = inherit ? `${sym.name}${inherit}` : sym.name;
+	return ctx ? `${ctx} ${name}` : name;
 }
 
 /** Exports-only: just top-level public symbols. */
@@ -60,10 +67,7 @@ function formatExports(filePath: string, file: CachedFile): string {
 
 	const lines: string[] = [filePath];
 	for (const sym of exported) {
-		const ctx = sym.context.join(" ");
-		const inherit = sym.inherits.length > 0 ? ` (: ${sym.inherits.join(", ")})` : "";
-		const label = ctx ? `${ctx} ${sym.name}` : sym.name;
-		lines.push(` ${label}${inherit}`);
+		lines.push(` ${formatSymbolLabel(sym)}`);
 	}
 
 	const hidden = file.symbols.length - exported.length;
