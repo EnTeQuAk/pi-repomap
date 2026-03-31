@@ -1,15 +1,10 @@
 /**
  * Format a repo map as compact, LLM-readable text.
  *
- * Produces output like:
- *
- *   src/auth/login.ts
- *     class AuthService L12-89
- *       async login(creds) L23
- *     export function hashPassword(pw) L91
- *
- * Respects a token budget by prioritizing exported symbols
- * and truncating with a summary footer.
+ * Three tiers of detail to maximize visibility within a token budget:
+ * - Full outline: top-scoring files get complete symbol trees
+ * - Exports only: mid-tier files show just their public API
+ * - File listing: remaining files shown as name + symbol count
  */
 
 import type { RepoMap, CachedFile } from "./cache.ts";
@@ -25,93 +20,195 @@ const EXPORT_KEYWORDS = new Set(["export", "pub"]);
 
 /** Is a symbol exported or public based on its context keywords? */
 function isExported(sym: Symbol, language: string): boolean {
-	// Language-specific export detection
 	if (language === "go") {
 		// Go: capitalized names are exported
 		return sym.name.length > 0 && sym.name[0] === sym.name[0].toUpperCase() && sym.name[0] !== sym.name[0].toLowerCase();
 	}
 	if (language === "python") {
-		// Python: symbols without leading underscore at top level
+		// Python: top-level symbols without leading underscore
 		return sym.depth === 0 && !sym.name.startsWith("_");
 	}
 	// TS/JS/Rust: look for export/pub in context
 	return sym.context.some((c) => EXPORT_KEYWORDS.has(c));
 }
 
-/**
- * Format a single file's symbols as compact text.
- */
-function formatFile(filePath: string, file: CachedFile): string {
+// -- Per-file formatting at different detail levels --
+
+/** Full outline with all symbols and nesting. */
+function formatFull(filePath: string, file: CachedFile): string {
 	const lines: string[] = [filePath];
 
 	for (const sym of file.symbols) {
-		const indent = "  ".repeat(sym.depth + 1);
+		const indent = " ".repeat(sym.depth + 1);
 		const ctx = sym.context.join(" ");
-		const range = sym.line === sym.endLine ? `L${sym.line}` : `L${sym.line}-${sym.endLine}`;
+		const range = sym.line === sym.endLine ? "" : ` L${sym.line}-${sym.endLine}`;
 		const label = ctx ? `${ctx} ${sym.name}` : sym.name;
-		lines.push(`${indent}${label} ${range}`);
+		lines.push(`${indent}${label}${range}`);
 	}
 
 	return lines.join("\n");
 }
 
-interface FormatOptions {
-	/** Maximum token budget. Default: 4096 */
+/** Exports-only: just top-level public symbols. */
+function formatExports(filePath: string, file: CachedFile): string {
+	const exported = file.symbols.filter((s) => isExported(s, file.language) && s.depth === 0);
+
+	if (exported.length === 0) {
+		return `${filePath} (${file.symbols.length} symbols)`;
+	}
+
+	const lines: string[] = [filePath];
+	for (const sym of exported) {
+		const ctx = sym.context.join(" ");
+		const label = ctx ? `${ctx} ${sym.name}` : sym.name;
+		lines.push(` ${label}`);
+	}
+
+	const hidden = file.symbols.length - exported.length;
+	if (hidden > 0) {
+		lines.push(` ... ${hidden} more`);
+	}
+
+	return lines.join("\n");
+}
+
+/** One-line summary: just file path and symbol count. */
+function formatSummary(filePath: string, file: CachedFile): string {
+	return `${filePath} (${file.symbols.length})`;
+}
+
+// -- Preamble that teaches the LLM how to read and use the map --
+
+function preamble(totalFiles: number, totalSymbols: number): string {
+	return `# Repository Map (${totalFiles} files, ${totalSymbols} symbols)
+
+This map shows the structure of the codebase. Top files have full
+symbol outlines (classes, functions, types with nesting). Files
+below that show only exported/public symbols. The rest are listed
+by name with a symbol count.
+
+To explore any file in detail: \`repomap outline <path>\`
+To refresh after major changes: \`repomap rebuild\`
+`;
+}
+
+export interface FormatOptions {
+	/** Max tokens for the entire map. Scales with context window if not set. */
 	tokenBudget?: number;
+	/** Model context window size in tokens. Used to auto-scale budget. */
+	contextWindow?: number;
+}
+
+/**
+ * Compute the token budget.
+ *
+ * When no explicit budget is set, use ~3% of the model's context window,
+ * clamped between 2048 and 16384. Falls back to 4096 when context
+ * window is unknown.
+ */
+function resolveBudget(options: FormatOptions): number {
+	if (options.tokenBudget) return options.tokenBudget;
+	if (options.contextWindow) {
+		return Math.min(16384, Math.max(2048, Math.floor(options.contextWindow * 0.03)));
+	}
+	return 4096;
+}
+
+interface ScoredFile {
+	filePath: string;
+	file: CachedFile;
+	score: number;
+}
+
+function scoreFiles(entries: [string, CachedFile][]): ScoredFile[] {
+	const scored = entries.map(([filePath, file]) => {
+		const exportedCount = file.symbols.filter((s) => isExported(s, file.language)).length;
+		const score = exportedCount * 10 + file.symbols.length;
+		return { filePath, file, score };
+	});
+	scored.sort((a, b) => b.score - a.score);
+	return scored;
 }
 
 /**
  * Format the full repo map for LLM consumption.
  *
- * Prioritization when over budget:
- * 1. Files with exported symbols come first
- * 2. Within a file, exported/public symbols before private
- * 3. Files with more symbols are ranked higher
- * 4. Truncate with a footer showing what was omitted
+ * Allocates the token budget across three tiers:
+ * 1. Full outlines for the highest-scoring files (~60% of budget)
+ * 2. Exports-only for mid-tier files (~25% of budget)
+ * 3. One-line summaries for the rest (~15% of budget)
  */
 export function formatForLLM(map: RepoMap, options: FormatOptions = {}): string {
-	const budget = options.tokenBudget ?? 4096;
+	const budget = resolveBudget(options);
 	const entries = Object.entries(map.files);
 
 	if (entries.length === 0) {
 		return "# Repository Map\n\nNo supported source files found.";
 	}
 
-	// Score files for prioritization
-	const scored = entries.map(([filePath, file]) => {
-		const exportedCount = file.symbols.filter((s) => isExported(s, file.language)).length;
-		const score = exportedCount * 10 + file.symbols.length;
-		return { filePath, file, score };
-	});
-
-	// Sort: highest score first
-	scored.sort((a, b) => b.score - a.score);
-
-	// Count totals for header
+	const scored = scoreFiles(entries);
 	const totalFiles = entries.length;
 	const totalSymbols = entries.reduce((sum, [, f]) => sum + f.symbols.length, 0);
 
-	const header = `# Repository Map (${totalFiles} files, ${totalSymbols} symbols)\n`;
+	const header = preamble(totalFiles, totalSymbols);
 	let output = header;
 	let tokens = estimateTokens(header);
-	let includedFiles = 0;
 
-	for (const { filePath, file } of scored) {
-		const block = "\n" + formatFile(filePath, file);
+	// Tier 1: full outlines, up to ~60% of budget
+	const fullBudget = budget * 0.6;
+	let idx = 0;
+
+	while (idx < scored.length) {
+		const block = "\n" + formatFull(scored[idx].filePath, scored[idx].file);
 		const blockTokens = estimateTokens(block);
 
-		if (tokens + blockTokens > budget && includedFiles > 0) {
-			const remaining = scored.length - includedFiles;
-			const remainingSymbols = scored
-				.slice(includedFiles)
-				.reduce((sum, e) => sum + e.file.symbols.length, 0);
-			output += `\n\n... and ${remaining} more files (${remainingSymbols} symbols)`;
-			break;
-		}
+		if (tokens + blockTokens > fullBudget && idx > 0) break;
 
 		output += block;
 		tokens += blockTokens;
-		includedFiles++;
+		idx++;
+	}
+
+	// Tier 2: exports-only, up to ~85% of budget
+	const exportsBudget = budget * 0.85;
+
+	if (idx < scored.length) {
+		output += "\n";
+	}
+
+	while (idx < scored.length) {
+		const block = "\n" + formatExports(scored[idx].filePath, scored[idx].file);
+		const blockTokens = estimateTokens(block);
+
+		if (tokens + blockTokens > exportsBudget && idx > 0) break;
+
+		output += block;
+		tokens += blockTokens;
+		idx++;
+	}
+
+	// Tier 3: one-line summaries for what's left, filling remaining budget
+	if (idx < scored.length) {
+		output += "\n";
+	}
+
+	const summaryStart = idx;
+	while (idx < scored.length) {
+		const line = "\n" + formatSummary(scored[idx].filePath, scored[idx].file);
+		const lineTokens = estimateTokens(line);
+
+		if (tokens + lineTokens > budget) break;
+
+		output += line;
+		tokens += lineTokens;
+		idx++;
+	}
+
+	// Footer: count of anything that didn't fit at all
+	const hidden = scored.length - idx;
+	if (hidden > 0) {
+		const hiddenSymbols = scored.slice(idx).reduce((sum, e) => sum + e.file.symbols.length, 0);
+		output += `\n\n${hidden} more files (${hiddenSymbols} symbols) not shown.`;
 	}
 
 	return output;
@@ -119,7 +216,8 @@ export function formatForLLM(map: RepoMap, options: FormatOptions = {}): string 
 
 /**
  * Format a single file's outline (for the outline tool action).
+ * Always uses full detail regardless of budget.
  */
 export function formatFileOutline(filePath: string, file: CachedFile): string {
-	return formatFile(filePath, file);
+	return formatFull(filePath, file);
 }

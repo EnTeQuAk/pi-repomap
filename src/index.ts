@@ -147,14 +147,16 @@ export default function (pi: ExtensionAPI) {
 		let map: cache.RepoMap;
 		try {
 			map = buildMap(ctx.cwd);
-		} catch {
-			return; // Silently skip if scanning fails
+		} catch (err) {
+			console.error(`[repomap] buildMap failed: ${err}`);
+			return;
 		}
 
 		const fileCount = Object.keys(map.files).length;
 		if (fileCount === 0) return;
 
-		const formatted = formatForLLM(map);
+		const contextWindow = ctx.model?.contextWindow;
+		const formatted = formatForLLM(map, { contextWindow });
 
 		return {
 			message: {
@@ -197,6 +199,9 @@ export default function (pi: ExtensionAPI) {
 		description:
 			"Query or rebuild the repository symbol map. Actions: status (check map freshness), rebuild (force regenerate), outline (get symbol outline for a specific file)",
 		promptSnippet: "Query the repository symbol map for codebase structure overview",
+		promptGuidelines: [
+			"The repo map in your context shows a structural overview of the codebase. Use `repomap outline <file>` to see full symbol details for any file, especially files listed in the summary tiers.",
+		],
 		parameters: Type.Object({
 			action: StringEnum(["status", "rebuild", "outline"] as const),
 			file: Type.Optional(
