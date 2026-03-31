@@ -93,7 +93,7 @@ Tree-sitter itself supports [hundreds of languages](https://tree-sitter.github.i
 6. **Cache**: Results stored in `.pi/cache/repomap.json` with per-file mtime tracking
 7. **Format**: Symbols are formatted into three tiers within a token budget and injected via `before_agent_start`
 
-Token budget scales with model context window (~3%, clamped between 2048 and 16384 tokens). Incremental updates: only files with changed mtimes get re-parsed. A git HEAD change triggers a full rebuild.
+Token budget scales with model context window (~3%, kept between 2048 and 16384 tokens). Incremental updates: only files with changed mtimes get re-parsed. A git HEAD change triggers a full rebuild.
 
 ## Credits
 
