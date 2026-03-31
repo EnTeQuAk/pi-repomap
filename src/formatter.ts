@@ -121,23 +121,24 @@ interface ScoredFile {
 }
 
 /**
- * Score files using cross-file reference analysis.
+ * Build a weighted directed graph from cross-file references, then
+ * run PageRank to score file importance.
  *
- * Builds a definition map (identifier -> files that define it), then
- * counts how many times each file's definitions are referenced by
- * other files. Files whose symbols are widely used rank highest.
+ * Edge: file A references identifier X defined in file B -> edge A->B.
+ * Weight: sqrt(ref count) to dampen high-frequency mentions.
+ * Identifiers defined in >5 files are skipped (too generic: "get", "id").
  *
- * This is a simplified version of aider's PageRank approach: instead
- * of full graph ranking, we count inbound reference edges. A file
- * that defines `Celery` which is referenced in 50 other files gets
- * a high score, regardless of import path resolution.
+ * Follows aider's approach but without the networkx dependency.
  */
 function scoreFiles(entries: [string, CachedFile][]): ScoredFile[] {
+	const filePaths = entries.map(([p]) => p);
+	const fileSet = new Set(filePaths);
+
 	// Build: identifier name -> set of files that define it
 	const definedIn = new Map<string, Set<string>>();
 	for (const [filePath, file] of entries) {
 		for (const sym of file.symbols) {
-			if (sym.depth > 0) continue; // Only top-level definitions
+			if (sym.depth > 0) continue;
 			let files = definedIn.get(sym.name);
 			if (!files) {
 				files = new Set();
@@ -147,38 +148,92 @@ function scoreFiles(entries: [string, CachedFile][]): ScoredFile[] {
 		}
 	}
 
-	// Count inbound references: for each file's refs, find which files
-	// define those identifiers, and credit the defining file.
-	const inboundCount = new Map<string, number>();
+	// Build weighted edge list: source -> [{target, weight}]
+	const edges = new Map<string, Map<string, number>>();
+	for (const p of filePaths) edges.set(p, new Map());
+
 	for (const [referencerPath, file] of entries) {
-		// Count each referenced identifier once per file (not per occurrence)
-		const seen = new Set<string>();
+		const refCounts = new Map<string, number>();
 		for (const refName of file.refs) {
-			if (seen.has(refName)) continue;
-			seen.add(refName);
+			refCounts.set(refName, (refCounts.get(refName) ?? 0) + 1);
+		}
 
+		for (const [refName, count] of refCounts) {
 			const definers = definedIn.get(refName);
-			if (!definers) continue;
+			if (!definers || definers.size > 5) continue;
 
-			// Skip self-references and identifiers defined in many files
-			// (common names like "get", "set", "id" are noise)
-			if (definers.size > 5) continue;
-
+			const weight = Math.sqrt(count);
 			for (const definer of definers) {
 				if (definer === referencerPath) continue;
-				inboundCount.set(definer, (inboundCount.get(definer) ?? 0) + 1);
+				const outEdges = edges.get(referencerPath)!;
+				outEdges.set(definer, (outEdges.get(definer) ?? 0) + weight);
 			}
 		}
 	}
 
+	// PageRank: iterative power method
+	const ranks = pageRank(filePaths, edges);
+
 	const scored = entries.map(([filePath, file]) => {
-		const inbound = inboundCount.get(filePath) ?? 0;
+		const rank = ranks.get(filePath) ?? 0;
 		const exportedCount = file.symbols.filter((s) => isExported(s, file.language)).length;
-		const score = inbound * 100 + exportedCount * 10 + file.symbols.length;
+		// Combine PageRank with local signals as tiebreakers
+		const score = rank * 10000 + exportedCount * 10 + file.symbols.length;
 		return { filePath, file, score };
 	});
 	scored.sort((a, b) => b.score - a.score);
 	return scored;
+}
+
+/**
+ * PageRank via iterative power method.
+ *
+ * Standard algorithm: each node distributes its rank to outgoing edges
+ * proportional to edge weight. Damping factor 0.85, converges in ~20
+ * iterations for typical codebases.
+ */
+function pageRank(
+	nodes: string[],
+	edges: Map<string, Map<string, number>>,
+	damping: number = 0.85,
+	iterations: number = 20,
+): Map<string, number> {
+	const n = nodes.length;
+	if (n === 0) return new Map();
+
+	const base = (1 - damping) / n;
+	let ranks = new Map<string, number>();
+	for (const node of nodes) ranks.set(node, 1 / n);
+
+	for (let i = 0; i < iterations; i++) {
+		const next = new Map<string, number>();
+		for (const node of nodes) next.set(node, base);
+
+		for (const node of nodes) {
+			const outEdges = edges.get(node);
+			if (!outEdges || outEdges.size === 0) {
+				// Dangling node: distribute rank evenly
+				const share = (damping * (ranks.get(node) ?? 0)) / n;
+				for (const target of nodes) {
+					next.set(target, (next.get(target) ?? 0) + share);
+				}
+				continue;
+			}
+
+			const rank = ranks.get(node) ?? 0;
+			let totalWeight = 0;
+			for (const w of outEdges.values()) totalWeight += w;
+
+			for (const [target, weight] of outEdges) {
+				const share = damping * rank * (weight / totalWeight);
+				next.set(target, (next.get(target) ?? 0) + share);
+			}
+		}
+
+		ranks = next;
+	}
+
+	return ranks;
 }
 
 /**
