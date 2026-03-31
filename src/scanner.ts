@@ -86,12 +86,17 @@ export function scan(cwd: string, onlyPaths?: Set<string>): ScanResult {
 	const start = Date.now();
 	const allFiles = listGitFiles(cwd);
 
-	// Filter out non-source directories (at any depth) and unsupported files.
-	const skipDirs = ["node_modules", "vendor", "dist", "build", ".git", "__pycache__"];
+	// Filter out non-source directories (at any depth), generated files, and unsupported files.
+	const skipDirs = ["node_modules", "vendor", "dist", "build", ".git", "__pycache__", ".dart_tool"];
 	const candidates = allFiles
 		.filter((f) => {
 			const parts = f.split("/");
-			return !parts.some((p) => skipDirs.includes(p)) && !f.startsWith(".");
+			if (parts.some((p) => skipDirs.includes(p))) return false;
+			if (f.startsWith(".")) return false;
+			// Skip common generated file patterns
+			if (f.endsWith(".g.dart") || f.endsWith(".freezed.dart") || f.endsWith(".gr.dart")) return false;
+			if (f.endsWith(".generated.ts") || f.endsWith(".gen.go")) return false;
+			return true;
 		})
 		.filter(isSupportedFile);
 	const truncated = Math.max(0, candidates.length - MAX_FILES);

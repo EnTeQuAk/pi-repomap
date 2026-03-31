@@ -18,6 +18,8 @@ const EXTENSION_MAP: Record<string, string> = {
 	".pyw": "python",
 	".go": "go",
 	".rs": "rust",
+	".cs": "csharp",
+	".dart": "dart",
 };
 
 /**

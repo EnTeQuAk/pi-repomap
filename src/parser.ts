@@ -17,6 +17,8 @@ import JSGrammar from "tree-sitter-javascript";
 import PYGrammar from "tree-sitter-python";
 import GOGrammar from "tree-sitter-go";
 import RSGrammar from "tree-sitter-rust";
+import CSGrammar from "tree-sitter-c-sharp";
+import DartGrammar from "tree-sitter-dart";
 
 const GRAMMARS: Record<string, Parser.Language> = {
 	typescript: TSGrammar.typescript as unknown as Parser.Language,
@@ -25,6 +27,8 @@ const GRAMMARS: Record<string, Parser.Language> = {
 	python: PYGrammar as unknown as Parser.Language,
 	go: GOGrammar as unknown as Parser.Language,
 	rust: RSGrammar as unknown as Parser.Language,
+	csharp: CSGrammar as unknown as Parser.Language,
+	dart: DartGrammar as unknown as Parser.Language,
 };
 
 export interface Symbol {
