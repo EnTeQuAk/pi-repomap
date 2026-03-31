@@ -1,0 +1,105 @@
+/**
+ * Repo map cache.
+ *
+ * Stores symbol data as JSON in .pi/cache/repomap.json.
+ * Uses file mtime as the primary freshness signal, with
+ * git HEAD hash as a secondary check.
+ */
+
+import * as fs from "node:fs";
+import * as path from "node:path";
+import type { Symbol } from "./parser.ts";
+
+export interface CachedFile {
+	mtime: number;
+	language: string;
+	symbols: Symbol[];
+}
+
+export interface RepoMap {
+	version: string;
+	generated: string;
+	gitHead: string | null;
+	files: Record<string, CachedFile>;
+}
+
+const CACHE_VERSION = "1";
+
+/**
+ * Resolve the cache file path for a project.
+ */
+function cachePath(cwd: string): string {
+	return path.join(cwd, ".pi", "cache", "repomap.json");
+}
+
+/**
+ * Load the cached repo map, or null if missing/corrupt.
+ */
+export function load(cwd: string): RepoMap | null {
+	const p = cachePath(cwd);
+	if (!fs.existsSync(p)) return null;
+
+	try {
+		const data = JSON.parse(fs.readFileSync(p, "utf-8")) as RepoMap;
+		if (data.version !== CACHE_VERSION) return null;
+		return data;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Save a repo map to the cache.
+ */
+export function save(cwd: string, map: RepoMap): void {
+	const p = cachePath(cwd);
+	const dir = path.dirname(p);
+	fs.mkdirSync(dir, { recursive: true });
+
+	// Write to a temp file then rename for atomicity
+	const tmp = `${p}.tmp`;
+	fs.writeFileSync(tmp, JSON.stringify(map), "utf-8");
+	fs.renameSync(tmp, p);
+}
+
+/**
+ * Find files that need re-scanning.
+ *
+ * Compares current file mtimes against the cached values.
+ * Returns the set of relative paths that changed, plus
+ * any new files not in the cache.
+ *
+ * If gitHead changed, returns null to signal a full rebuild.
+ */
+export function findStaleFiles(
+	cwd: string,
+	cached: RepoMap,
+	currentGitHead: string | null,
+	currentFiles: Map<string, number>,
+): Set<string> | null {
+	// If git HEAD changed, recommend full rebuild. The mtime check
+	// will still catch most changes, but branch switches can reset
+	// mtimes without changing content. Better safe than stale.
+	if (currentGitHead && cached.gitHead && currentGitHead !== cached.gitHead) {
+		return null;
+	}
+
+	const stale = new Set<string>();
+
+	// Files that changed or are new
+	for (const [filePath, mtime] of currentFiles) {
+		const entry = cached.files[filePath];
+		if (!entry || entry.mtime < mtime) {
+			stale.add(filePath);
+		}
+	}
+
+	return stale;
+}
+
+/**
+ * Check if a cache exists for a project.
+ */
+export function exists(cwd: string): boolean {
+	return fs.existsSync(cachePath(cwd));
+}
