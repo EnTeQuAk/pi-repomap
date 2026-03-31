@@ -3,9 +3,21 @@
 ;
 ; Source: https://github.com/zed-extensions/dart (extended)
 
+; Classes: base pattern plus inheritance patterns that repeat @name
+; and @item so the parser can merge context captures across matches.
 (class_definition
   "class" @context
   name: (_) @name) @item
+
+(class_definition
+  name: (_) @name
+  superclass: (superclass
+    (type_identifier) @inherit)) @item
+
+(class_definition
+  name: (_) @name
+  interfaces: (interfaces
+    (type_identifier) @inherit)) @item
 
 (mixin_declaration
   "mixin" @context

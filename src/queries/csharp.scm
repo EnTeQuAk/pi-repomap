@@ -15,9 +15,19 @@
   "class" @context
   name: (identifier) @name) @item
 
+(class_declaration
+  name: (identifier) @name
+  (base_list
+    (identifier) @inherit)) @item
+
 (interface_declaration
   "interface" @context
   name: (identifier) @name) @item
+
+(interface_declaration
+  name: (identifier) @name
+  (base_list
+    (identifier) @inherit)) @item
 
 (struct_declaration
   "struct" @context

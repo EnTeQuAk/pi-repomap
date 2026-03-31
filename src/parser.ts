@@ -34,6 +34,7 @@ const GRAMMARS: Record<string, Parser.Language> = {
 export interface Symbol {
 	name: string;
 	context: string[]; // Keywords like "async", "export", "pub", "class"
+	inherits: string[]; // Superclasses, interfaces, traits
 	line: number; // 1-based start line
 	endLine: number; // 1-based end line
 	depth: number; // Nesting depth (0 = top-level)
@@ -129,7 +130,10 @@ export function extractSymbols(sourceCode: string, language: string): FileSymbol
  * We pull the symbol name, context keywords, and source range from these.
  */
 function matchesToSymbols(matches: Parser.QueryMatch[]): Symbol[] {
-	const symbols: Symbol[] = [];
+	// Multiple query patterns can match the same node (e.g., a class pattern
+	// plus an inheritance pattern). We key by the @item node's start position
+	// and merge captures across matches.
+	const byKey = new Map<string, Symbol>();
 
 	for (const match of matches) {
 		const nameCapture = match.captures.find((c) => c.name === "name");
@@ -140,19 +144,35 @@ function matchesToSymbols(matches: Parser.QueryMatch[]): Symbol[] {
 		const contextCaptures = match.captures.filter((c) => c.name === "context");
 		const context = contextCaptures.map((c) => c.node.text).filter((t) => t !== "(" && t !== ")");
 
+		const inheritCaptures = match.captures.filter((c) => c.name === "inherit");
+		const inherits = inheritCaptures.map((c) => c.node.text);
+
 		const startRow = itemCapture?.node.startPosition.row ?? nameCapture.node.startPosition.row;
 		const endRow = itemCapture?.node.endPosition.row ?? nameCapture.node.endPosition.row;
 
-		symbols.push({
-			name: nameCapture.node.text,
-			context,
-			line: startRow + 1, // Convert to 1-based
-			endLine: endRow + 1,
-			depth: 0, // Assigned later
-		});
+		const key = `${nameCapture.node.text}:${startRow}`;
+		const existing = byKey.get(key);
+
+		if (existing) {
+			for (const c of context) {
+				if (!existing.context.includes(c)) existing.context.push(c);
+			}
+			for (const i of inherits) {
+				if (!existing.inherits.includes(i)) existing.inherits.push(i);
+			}
+		} else {
+			byKey.set(key, {
+				name: nameCapture.node.text,
+				context,
+				inherits,
+				line: startRow + 1,
+				endLine: endRow + 1,
+				depth: 0,
+			});
+		}
 	}
 
-	return symbols;
+	return [...byKey.values()];
 }
 
 /**

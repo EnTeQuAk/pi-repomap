@@ -60,10 +60,34 @@
   "class" @context
   name: (_) @name) @item
 
+(class_declaration
+  name: (_) @name
+  (class_heritage
+    (extends_clause
+      value: (identifier) @inherit))) @item
+
+(class_declaration
+  name: (_) @name
+  (class_heritage
+    (implements_clause
+      (type_identifier) @inherit))) @item
+
 (abstract_class_declaration
   "abstract" @context
   "class" @context
   name: (_) @name) @item
+
+(abstract_class_declaration
+  name: (_) @name
+  (class_heritage
+    (extends_clause
+      value: (identifier) @inherit))) @item
+
+(abstract_class_declaration
+  name: (_) @name
+  (class_heritage
+    (implements_clause
+      (type_identifier) @inherit))) @item
 
 ; Methods in classes
 (class_body

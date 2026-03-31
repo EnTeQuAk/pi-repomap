@@ -4,6 +4,11 @@
   "class" @context
   name: (identifier) @name) @item
 
+(class_definition
+  name: (identifier) @name
+  superclasses: (argument_list
+    (identifier) @inherit)) @item
+
 (function_definition
   "async"? @context
   "def" @context
