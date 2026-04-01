@@ -59,9 +59,7 @@ export function load(cwd: string): RepoMap | null {
 let sessionToken: string | null = null;
 
 function getSessionToken(): string {
-	if (!sessionToken) {
-		sessionToken = Math.random().toString(36).slice(2) + Date.now().toString(36);
-	}
+	sessionToken ??= Math.random().toString(36).slice(2) + Date.now().toString(36);
 	return sessionToken;
 }
 

@@ -146,22 +146,86 @@ function timeSince(date: Date): string {
 
 // --- Extension entry point ---
 
+// Configuration interface
+interface RepoMapConfig {
+	refreshStrategy: "auto" | "always" | "files" | "manual" | "never";
+	tokenBudget?: number;
+}
+
+// Default configuration
+const DEFAULT_CONFIG: RepoMapConfig = {
+	refreshStrategy: "auto",
+};
+
+// State to track last injection to determine when to refresh
+let lastInjection: { gitHead: string | null; fileCount: number; timestamp: number } | null = null;
+
 export default function (pi: ExtensionAPI) {
-	// Inject repo map as context on every prompt
-	pi.on("before_agent_start", async (_event, ctx) => {
+	// Load configuration
+	function getConfig(): RepoMapConfig {
+		// TODO: Add proper configuration loading when pi supports it
+		// For now, use defaults
+		return DEFAULT_CONFIG;
+	}
+
+	function shouldInjectRepoMap(ctx: ExtensionContext, map: cache.RepoMap): boolean {
+		const config = getConfig();
+		const strategy = config.refreshStrategy;
+
+		if (strategy === "never") return false;
+		if (strategy === "manual") return false;
+		if (strategy === "always") return true;
+
+		const gitHead = getGitHead(ctx.cwd);
+		const fileCount = Object.keys(map.files).length;
+		const now = Date.now();
+
+		// First injection or strategy is "files"/"auto"
+		if (!lastInjection) return true;
+		
+		if (strategy === "files") {
+			// Only inject when git head or file count changes
+			return lastInjection.gitHead !== gitHead || lastInjection.fileCount !== fileCount;
+		}
+
+		if (strategy === "auto") {
+			// Smart refresh: inject if files changed OR it's been >5min since last injection
+			const timeSinceLastInjection = now - lastInjection.timestamp;
+			const filesChanged = lastInjection.gitHead !== gitHead || lastInjection.fileCount !== fileCount;
+			const timeLimitExceeded = timeSinceLastInjection > 5 * 60 * 1000; // 5 minutes
+
+			return filesChanged || timeLimitExceeded;
+		}
+
+		return false;
+	}
+
+	// Inject repo map as context based on refresh strategy
+	pi.on("before_agent_start", (_event, ctx) => {
 		let map: cache.RepoMap;
 		try {
 			map = buildMap(ctx.cwd);
 		} catch (err) {
-			console.error(`[repomap] buildMap failed: ${err}`);
+			console.error(`[repomap] buildMap failed: ${String(err)}`);
 			return;
 		}
 
 		const fileCount = Object.keys(map.files).length;
 		if (fileCount === 0) return;
 
+		if (!shouldInjectRepoMap(ctx, map)) return;
+
+		const config = getConfig();
 		const contextWindow = ctx.model?.contextWindow;
-		const formatted = formatForLLM(map, { contextWindow });
+		const tokenBudget = config.tokenBudget;
+		const formatted = formatForLLM(map, { contextWindow, tokenBudget });
+
+		// Update last injection state
+		lastInjection = {
+			gitHead: getGitHead(ctx.cwd),
+			fileCount,
+			timestamp: Date.now(),
+		};
 
 		return {
 			message: {
@@ -174,9 +238,45 @@ export default function (pi: ExtensionAPI) {
 
 	// /repomap command for manual control
 	pi.registerCommand("repomap", {
-		description: "Show repo map status or rebuild",
+		description: "Show repo map status, rebuild, or configure refresh strategy",
+		// eslint-disable-next-line @typescript-eslint/require-await
 		handler: async (args, ctx) => {
 			const force = args?.includes("--force") ?? false;
+			const showConfig = args?.includes("--config") ?? false;
+
+			if (showConfig) {
+				const config = getConfig();
+				const lines = [
+					"## Repo Map Configuration",
+					"",
+					`**Refresh Strategy:** ${config.refreshStrategy}`,
+					"- `auto` - Smart refresh (files changed or 5min timeout)",
+					"- `always` - Every prompt (heavy context usage)",
+					"- `files` - Only when files change",
+					"- `manual` - Only via /repomap command",
+					"- `never` - Disable completely",
+					"",
+					`**Token Budget:** ${config.tokenBudget ?? "auto (3% of context window)"}`,
+					"",
+					"To configure, add to your pi settings:",
+					"```json",
+					`{`,
+					`  "repomap": {`,
+					`    "refreshStrategy": "auto",`,
+					`    "tokenBudget": 4096`,
+					`  }`,
+					`}`,
+					"```",
+				];
+
+				if (lastInjection) {
+					const age = Math.floor((Date.now() - lastInjection.timestamp) / 1000);
+					lines.push("", `**Last injection:** ${age}s ago (${lastInjection.fileCount} files)`);
+				}
+
+				ctx.ui.notify(lines.join("\n"), "info");
+				return;
+			}
 
 			if (force) {
 				const start = Date.now();
@@ -187,12 +287,35 @@ export default function (pi: ExtensionAPI) {
 					0,
 				);
 				const duration = Date.now() - start;
+
+				// Force inject the rebuilt map
+				const config = getConfig();
+				const contextWindow = ctx.model?.contextWindow;
+				const tokenBudget = config.tokenBudget;
+				const formatted = formatForLLM(map, { contextWindow, tokenBudget });
+
+				lastInjection = {
+					gitHead: getGitHead(ctx.cwd),
+					fileCount,
+					timestamp: Date.now(),
+				};
+
+				// Send as user message to inject into context
+				pi.sendUserMessage(`<repo_map>\n${formatted}\n</repo_map>`);
+
 				ctx.ui.notify(
-					`Rebuilt repo map: ${fileCount} files, ${symbolCount} symbols (${duration}ms)`,
-					"success",
+					`Rebuilt and injected repo map: ${fileCount} files, ${symbolCount} symbols (${duration}ms)`,
+					"info",
 				);
 			} else {
-				ctx.ui.notify(getStatus(ctx.cwd), "info");
+				const config = getConfig();
+				const status = getStatus(ctx.cwd);
+				const strategy = config.refreshStrategy;
+
+				ctx.ui.notify(
+					`${status}\n\n**Refresh strategy:** ${strategy}${strategy === "never" ? " (disabled)" : ""}\n\nUse \`/repomap --config\` for configuration options or \`/repomap --force\` to rebuild.`,
+					"info",
+				);
 			}
 		},
 	});
@@ -207,6 +330,7 @@ export default function (pi: ExtensionAPI) {
 		promptGuidelines: [
 			"The repo map in your context shows a structural overview of the codebase. Use `repomap outline <file>` to see full symbol details for any file, especially files listed in the summary tiers.",
 			"Prefer `repomap outline` over `find` or `ls` when exploring code structure. The outline gives you symbols, nesting, and line numbers in one call.",
+			"Repo map injection is controlled by refreshStrategy (auto/always/files/manual/never). Use 'auto' (default) for smart refresh balancing context efficiency with freshness.",
 		],
 		parameters: Type.Object({
 			action: StringEnum(["status", "rebuild", "outline"] as const),
@@ -215,6 +339,7 @@ export default function (pi: ExtensionAPI) {
 			),
 		}),
 
+		// eslint-disable-next-line @typescript-eslint/require-await
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			switch (params.action) {
 				case "status": {
@@ -299,14 +424,14 @@ export default function (pi: ExtensionAPI) {
 				}
 
 				default:
-					throw new Error(`Unknown action: ${params.action}`);
+					throw new Error(`Unknown action: ${String(params.action)}`);
 			}
 		},
 
 		renderCall(args, theme) {
 			let text = theme.fg("toolTitle", theme.bold("repomap "));
 			text += theme.fg("muted", args.action);
-			if (args.file) text += " " + theme.fg("dim", args.file);
+			if (args.file) text += " " + theme.fg("dim", String(args.file));
 			return new Text(text, 0, 0);
 		},
 
@@ -314,7 +439,10 @@ export default function (pi: ExtensionAPI) {
 			const text = result.content[0];
 			const msg = text?.type === "text" ? text.text : "";
 
-			if (result.isError) {
+			// Determine if this is an error result from the message content
+			const isError = msg.toLowerCase().includes("error") || msg.toLowerCase().includes("cannot");
+
+			if (isError) {
 				return new Text(theme.fg("error", msg), 0, 0);
 			}
 
@@ -323,7 +451,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// Show status in footer
-	pi.on("session_start", async (_event, ctx) => {
+	pi.on("session_start", (_event, ctx) => {
 		const status = getStatus(ctx.cwd);
 		ctx.ui.setStatus("repomap", status);
 	});

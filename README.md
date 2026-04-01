@@ -58,16 +58,50 @@ npm install
 ln -sfn "$(pwd)" ~/.pi/agent/extensions/pi-repomap
 ```
 
+**Development scripts:**
+```bash
+npm run check       # Type check + lint
+npm run type-check  # TypeScript type checking only
+npm run lint        # ESLint only 
+npm run lint:fix    # Auto-fix ESLint issues
+```
+
 > **Note**: Native tree-sitter requires a C++ toolchain. On Node.js 24+, you may need `CXXFLAGS="-std=c++20"` during `npm install`.
 
 ## Usage
 
-The extension works automatically. Once installed, every prompt includes the repo map as context.
+The extension works automatically. By default, it uses the `auto` refresh strategy for smart context injection.
 
 ### Commands
 
-- `/repomap` - Show status (file count, symbol count, age)
-- `/repomap --force` - Force a full rebuild
+- `/repomap` - Show status (file count, symbol count, age, refresh strategy)
+- `/repomap --config` - Show configuration options and current settings
+- `/repomap --force` - Force rebuild and inject into current context
+
+### Configuration
+
+Control when the repo map is injected to balance context efficiency with freshness:
+
+```json
+{
+  "repomap": {
+    "refreshStrategy": "auto",
+    "tokenBudget": 4096
+  }
+}
+```
+
+**Refresh Strategies:**
+
+- `auto` (default) - Smart refresh: inject when files change OR every 5 minutes
+- `always` - Every prompt (heavy context usage, like the original behavior) 
+- `files` - Only when git HEAD or file count changes
+- `manual` - Only via `/repomap --force` command
+- `never` - Disable repo map injection completely
+
+**Token Budget:**
+- Explicit number (e.g., `4096`) - Fixed token limit
+- `null` (default) - Auto-scale to ~3% of model context window
 
 ### LLM Tool
 
@@ -97,7 +131,7 @@ Token budget scales with model context window (~3%, kept between 2048 and 16384 
 
 ## Credits
 
-Outline queries derived from [Zed](https://github.com/zed-industries/zed) and [zed-extensions](https://github.com/zed-extensions) (MIT/Apache-2.0 licensed). Ranking approach inspired by [aider](https://aider.chat/)'s repository map.
+Outline queries derived from [Zed](https://github.com/zed-industries/zed) and [zed-extensions](https://github.com/zed-extensions) (MIT/Apache-2.0 licensed). Repository map ranking and refresh strategies inspired by [aider](https://aider.chat/)'s intelligent repository context management.
 
 ## License
 

@@ -40,7 +40,6 @@ function formatFull(filePath: string, file: CachedFile): string {
 
 	for (const sym of file.symbols) {
 		const indent = " ".repeat(sym.depth + 1);
-		const ctx = sym.context.join(" ");
 		const range = sym.line === sym.endLine ? "" : ` L${sym.line}-${sym.endLine}`;
 		const label = formatSymbolLabel(sym);
 		lines.push(`${indent}${label}${range}`);
@@ -134,7 +133,6 @@ interface ScoredFile {
  */
 function scoreFiles(entries: [string, CachedFile][]): ScoredFile[] {
 	const filePaths = entries.map(([p]) => p);
-	const fileSet = new Set(filePaths);
 
 	// Build: identifier name -> set of files that define it
 	const definedIn = new Map<string, Set<string>>();
@@ -299,8 +297,6 @@ export function formatForLLM(map: RepoMap, options: FormatOptions = {}): string 
 	if (idx < scored.length) {
 		output += "\n";
 	}
-
-	const summaryStart = idx;
 	while (idx < scored.length) {
 		const line = "\n" + formatSummary(scored[idx].filePath, scored[idx].file);
 		const lineTokens = estimateTokens(line);

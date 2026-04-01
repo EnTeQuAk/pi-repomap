@@ -90,7 +90,7 @@ function loadQuery(language: string, queryType: string = ""): Parser.Query | nul
 		queryCache.set(cacheKey, query);
 		return query;
 	} catch (err) {
-		console.error(`Failed to compile ${filename}: ${err}`);
+		console.error(`Failed to compile ${filename}: ${String(err)}`);
 		return null;
 	}
 }
