@@ -453,9 +453,13 @@ export default function (pi: ExtensionAPI) {
 		},
 	});
 
-	// Show status in footer
+	// Build map on session start so cache has the current session token
 	pi.on("session_start", (_event, ctx) => {
-		const status = getStatus(ctx.cwd);
-		ctx.ui.setStatus("repomap", status);
+		try {
+			buildMap(ctx.cwd);
+		} catch {
+			// Ignore build errors at startup; before_agent_start will retry
+		}
+		ctx.ui.setStatus("repomap", getStatus(ctx.cwd));
 	});
 }
