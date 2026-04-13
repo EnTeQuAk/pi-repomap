@@ -210,6 +210,9 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
+		// Always update the status bar after building, even if we skip injection
+		ctx.ui.setStatus("repomap", getStatus(ctx.cwd));
+
 		const fileCount = Object.keys(map.files).length;
 		if (fileCount === 0) return;
 
