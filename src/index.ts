@@ -22,13 +22,14 @@ import * as path from "node:path";
 /**
  * Build or incrementally update the repo map for a project.
  */
-function buildMap(cwd: string, force: boolean = false): cache.RepoMap {
+function buildMap(cwd: string, force: boolean = false, config?: RepoMapConfig): cache.RepoMap {
 	const gitHead = getGitHead(cwd);
 	const existing = force ? null : cache.load(cwd);
+	const scanOpts = { includePaths: config?.includePaths, excludePaths: config?.excludePaths };
 
 	if (existing) {
 		// Collect current file mtimes for staleness check
-		const result = scan(cwd);
+		const result = scan(cwd, scanOpts);
 		const currentFiles = new Map<string, number>();
 		for (const f of result.files) {
 			currentFiles.set(f.path, f.mtime);
@@ -47,7 +48,7 @@ function buildMap(cwd: string, force: boolean = false): cache.RepoMap {
 		}
 
 		// Incremental: re-scan only stale files, merge with cache
-		const incremental = scan(cwd, stale);
+		const incremental = scan(cwd, { ...scanOpts, onlyPaths: stale });
 		const merged = mergeResults(existing, incremental.files, currentFiles);
 		merged.gitHead = gitHead;
 		merged.generated = new Date().toISOString();
@@ -56,7 +57,7 @@ function buildMap(cwd: string, force: boolean = false): cache.RepoMap {
 	}
 
 	// No cache, full scan
-	const result = scan(cwd);
+	const result = scan(cwd, scanOpts);
 	return fullBuild(cwd, result, gitHead);
 }
 
@@ -150,6 +151,10 @@ function timeSince(date: Date): string {
 interface RepoMapConfig {
 	refreshStrategy: "auto" | "always" | "files" | "manual" | "never";
 	tokenBudget?: number;
+	/** Only include files under these directories (relative to repo root) */
+	includePaths?: string[];
+	/** Exclude files under these directories (relative to repo root) */
+	excludePaths?: string[];
 }
 
 // Default configuration
@@ -204,7 +209,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("before_agent_start", (_event, ctx) => {
 		let map: cache.RepoMap;
 		try {
-			map = buildMap(ctx.cwd);
+			map = buildMap(ctx.cwd, false, getConfig());
 		} catch (err) {
 			console.error(`[repomap] buildMap failed: ${String(err)}`);
 			return;
@@ -260,13 +265,17 @@ export default function (pi: ExtensionAPI) {
 					"- `never` - Disable completely",
 					"",
 					`**Token Budget:** ${config.tokenBudget ?? "auto (3% of context window)"}`,
+					`**Include Paths:** ${config.includePaths?.length ? config.includePaths.join(", ") : "all (no filter)"}`,
+					`**Exclude Paths:** ${config.excludePaths?.length ? config.excludePaths.join(", ") : "none"}`,
 					"",
 					"To configure, add to your pi settings:",
 					"```json",
 					`{`,
 					`  "repomap": {`,
 					`    "refreshStrategy": "auto",`,
-					`    "tokenBudget": 4096`,
+					`    "tokenBudget": 4096,`,
+					`    "includePaths": ["src", "lib"],`,
+					`    "excludePaths": ["tests", "scripts"]`,
 					`  }`,
 					`}`,
 					"```",
@@ -283,7 +292,7 @@ export default function (pi: ExtensionAPI) {
 
 			if (force) {
 				const start = Date.now();
-				const map = buildMap(ctx.cwd, true);
+				const map = buildMap(ctx.cwd, true, getConfig());
 				const fileCount = Object.keys(map.files).length;
 				const symbolCount = Object.values(map.files).reduce(
 					(sum, f) => sum + f.symbols.length,
@@ -354,7 +363,7 @@ export default function (pi: ExtensionAPI) {
 
 				case "rebuild": {
 					const start = Date.now();
-					const map = buildMap(ctx.cwd, true);
+					const map = buildMap(ctx.cwd, true, getConfig());
 					const fileCount = Object.keys(map.files).length;
 					const symbolCount = Object.values(map.files).reduce(
 						(sum, f) => sum + f.symbols.length,
@@ -456,7 +465,7 @@ export default function (pi: ExtensionAPI) {
 	// Build map on session start so cache has the current session token
 	pi.on("session_start", (_event, ctx) => {
 		try {
-			buildMap(ctx.cwd);
+			buildMap(ctx.cwd, false, getConfig());
 		} catch {
 			// Ignore build errors at startup; before_agent_start will retry
 		}
