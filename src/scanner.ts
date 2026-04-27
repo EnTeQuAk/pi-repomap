@@ -83,7 +83,17 @@ export function getGitHead(cwd: string): string | null {
  *
  * Accepts an optional set of paths to limit scanning to (for incremental updates).
  */
-export function scan(cwd: string, onlyPaths?: Set<string>): ScanResult {
+export interface ScanOptions {
+	/** Only re-scan these paths (for incremental updates) */
+	onlyPaths?: Set<string>;
+	/** Only include files under these directories (relative to repo root, e.g. ["src", "lib"]) */
+	includePaths?: string[];
+	/** Exclude files under these directories (relative to repo root, e.g. ["tests", "scripts"]) */
+	excludePaths?: string[];
+}
+
+export function scan(cwd: string, options?: ScanOptions): ScanResult {
+	const { onlyPaths, includePaths, excludePaths } = options ?? {};
 	const start = Date.now();
 	const allFiles = listGitFiles(cwd);
 
@@ -99,7 +109,16 @@ export function scan(cwd: string, onlyPaths?: Set<string>): ScanResult {
 			if (f.endsWith(".generated.ts") || f.endsWith(".gen.go")) return false;
 			return true;
 		})
-		.filter(isSupportedFile);
+		.filter(isSupportedFile)
+		.filter((f) => {
+			if (includePaths && includePaths.length > 0) {
+				if (!includePaths.some((p) => f === p || f.startsWith(p + "/"))) return false;
+			}
+			if (excludePaths && excludePaths.length > 0) {
+				if (excludePaths.some((p) => f === p || f.startsWith(p + "/"))) return false;
+			}
+			return true;
+		});
 	const truncated = Math.max(0, candidates.length - MAX_FILES);
 	const filesToScan = candidates.slice(0, MAX_FILES);
 

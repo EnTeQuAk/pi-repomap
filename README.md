@@ -86,10 +86,17 @@ Control when the repo map is injected to balance context efficiency with freshne
 {
   "repomap": {
     "refreshStrategy": "auto",
-    "tokenBudget": 4096
+    "tokenBudget": 4096,
+    "includePaths": ["src", "lib"],
+    "excludePaths": ["tests", "fixtures"]
   }
 }
 ```
+
+**Path Filtering:**
+
+- `includePaths` - Only scan files under these directories (relative to repo root). If omitted or empty, all directories are included.
+- `excludePaths` - Skip files under these directories. Applied after `includePaths`.
 
 **Refresh Strategies:**
 
